@@ -4,9 +4,10 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.session import get_db
+from core.database import get_db
 from models.trend import Trend
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
@@ -27,9 +28,9 @@ class TrendResponse(BaseModel):
 
 
 @router.get("", response_model=list[TrendResponse])
-def get_trends(source: str | None = Query(default=None), db: Session = Depends(get_db)) -> list[Trend]:
-    query = db.query(Trend)
+def get_trends(source: str | None = Query(default=None), db: Session = Depends(get_db)):
+    stmt = select(Trend)
     if source:
-        query = query.filter(Trend.source == source)
-
-    return query.order_by(Trend.fetched_at.desc()).all()
+        stmt = stmt.where(Trend.source == source)
+    stmt = stmt.order_by(Trend.fetched_at.desc())
+    return db.execute(stmt).scalars().all()

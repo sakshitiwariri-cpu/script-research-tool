@@ -1,17 +1,19 @@
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text
-from sqlalchemy.sql import func
+from datetime import datetime
 
-from db.session import Base
+from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from core.database import Base
 
 
 class Trend(Base):
     __tablename__ = "trends"
 
-    id = Column(Integer, primary_key=True, index=True)
-    source = Column(String(50), nullable=False, index=True)
-    topic = Column(String(255), nullable=False, index=True)
-    description = Column(Text, nullable=True)
-    url = Column(String(500), nullable=True)
-    relevance_score = Column(Float, nullable=True)
-    fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    niche_tags = Column(String(255), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    topic: Mapped[str] = mapped_column(String(500), index=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    niche_tags: Mapped[str | None] = mapped_column(Text, nullable=True)

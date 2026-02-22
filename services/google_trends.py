@@ -5,38 +5,34 @@ from typing import Any
 from pytrends.request import TrendReq
 
 
-class GoogleTrendsService:
-    """Fetches Google trending searches for India using pytrends."""
+def fetch_google_trends_india() -> list[dict[str, Any]]:
+    """Fetch realtime trending searches for India using pytrends."""
+    pytrends = TrendReq(hl="en-IN", tz=330)
 
-    def __init__(self, hl: str = "en-IN", tz: int = 330) -> None:
-        self.client = TrendReq(hl=hl, tz=tz)
+    trends: list[dict[str, Any]] = []
 
-    def fetch_daily_trending_searches(self) -> list[dict[str, Any]]:
-        """
-        Returns daily trending topics for India.
+    try:
+        realtime_df = pytrends.realtime_trending_searches(pn="IN")
+        for _, row in realtime_df.iterrows():
+            trends.append(
+                {
+                    "topic": str(row.get("title", "")).strip(),
+                    "search_volume": row.get("formattedTraffic"),
+                    "description": row.get("entityNames"),
+                    "url": row.get("image", {}).get("newsUrl") if isinstance(row.get("image"), dict) else None,
+                }
+            )
+    except Exception:
+        fallback_df = pytrends.trending_searches(pn="india")
+        for _, row in fallback_df.iterrows():
+            topic = str(row.iloc[0]).strip()
+            trends.append(
+                {
+                    "topic": topic,
+                    "search_volume": None,
+                    "description": None,
+                    "url": None,
+                }
+            )
 
-        Output shape:
-        [
-          {"topic": "...", "search_volume": "...|None"}
-        ]
-        """
-        trends_df = self.client.realtime_trending_searches(pn="IN")
-
-        results: list[dict[str, Any]] = []
-        if "title" in trends_df.columns:
-            for _, row in trends_df.iterrows():
-                title_data = row.get("title")
-                topic = title_data.get("query") if isinstance(title_data, dict) else str(title_data)
-                results.append(
-                    {
-                        "topic": topic,
-                        "search_volume": row.get("formattedTraffic"),
-                    }
-                )
-        else:
-            # Fallback for older pytrends behavior.
-            fallback_df = self.client.trending_searches(pn="india")
-            for _, row in fallback_df.iterrows():
-                results.append({"topic": row.iloc[0], "search_volume": None})
-
-        return results
+    return [trend for trend in trends if trend.get("topic")]

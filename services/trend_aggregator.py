@@ -1,83 +1,91 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from models.trend import Trend
-from services.google_trends import GoogleTrendsService
-from services.news_service import NewsService
-from services.reddit_service import RedditService
+from services.google_trends import fetch_google_trends_india
+from services.news_service import fetch_india_headlines
+from services.reddit_service import fetch_reddit_hot_posts
 
 
-class TrendAggregator:
-    def __init__(self, db: Session) -> None:
-        self.db = db
-        self.google_service = GoogleTrendsService()
-        self.news_service = NewsService()
-        self.reddit_service = RedditService()
+def _normalized_topic(topic: str) -> str:
+    return " ".join(topic.lower().split())
 
-    @staticmethod
-    def _normalize(text: str | None) -> str:
-        return (text or "").strip().lower()
 
-    def _dedupe(self, trends: Iterable[Trend]) -> list[Trend]:
-        unique: dict[str, Trend] = {}
-        for trend in trends:
-            key = self._normalize(trend.topic)
-            if key and key not in unique:
-                unique[key] = trend
-        return list(unique.values())
+def aggregate_trends(db: Session) -> list[Trend]:
+    """Fetch, deduplicate, and persist trends from all sources."""
+    google_items = fetch_google_trends_india()
+    news_items = fetch_india_headlines()
+    reddit_items = fetch_reddit_hot_posts()
 
-    def _collect(self) -> list[Trend]:
-        now = datetime.now(timezone.utc)
-        items: list[Trend] = []
+    seen_topics: set[str] = set()
+    trend_models: list[Trend] = []
+    now = datetime.utcnow()
 
-        for item in self.google_service.fetch_daily_trending_searches():
-            items.append(
-                Trend(
-                    source="google",
-                    topic=item.get("topic"),
-                    description=f"Search volume: {item.get('search_volume')}",
-                    relevance_score=None,
-                    fetched_at=now,
-                    niche_tags="search",
-                )
+    for item in google_items:
+        topic = item.get("topic")
+        if not topic:
+            continue
+        key = _normalized_topic(topic)
+        if key in seen_topics:
+            continue
+        seen_topics.add(key)
+        trend_models.append(
+            Trend(
+                source="google",
+                topic=topic,
+                description=item.get("description"),
+                url=item.get("url"),
+                relevance_score=None,
+                fetched_at=now,
+                niche_tags="search,india",
             )
+        )
 
-        for item in self.news_service.fetch_top_headlines():
-            items.append(
-                Trend(
-                    source="news",
-                    topic=item.get("headline"),
-                    description=item.get("description"),
-                    url=item.get("url"),
-                    relevance_score=None,
-                    fetched_at=item.get("published_date") or now,
-                    niche_tags=item.get("category"),
-                )
+    for item in news_items:
+        topic = item.get("headline")
+        if not topic:
+            continue
+        key = _normalized_topic(topic)
+        if key in seen_topics:
+            continue
+        seen_topics.add(key)
+        trend_models.append(
+            Trend(
+                source="news",
+                topic=topic,
+                description=item.get("description") or item.get("source"),
+                url=item.get("url"),
+                relevance_score=None,
+                fetched_at=now,
+                niche_tags=f"news,{item.get('category', 'general')}",
             )
+        )
 
-        for item in self.reddit_service.fetch_hot_posts():
-            items.append(
-                Trend(
-                    source="reddit",
-                    topic=item.get("title"),
-                    description=f"Subreddit: r/{item.get('subreddit')}",
-                    url=item.get("url"),
-                    relevance_score=item.get("score"),
-                    fetched_at=now,
-                    niche_tags=item.get("subreddit"),
-                )
+    for item in reddit_items:
+        topic = item.get("title")
+        if not topic:
+            continue
+        key = _normalized_topic(topic)
+        if key in seen_topics:
+            continue
+        seen_topics.add(key)
+        trend_models.append(
+            Trend(
+                source="reddit",
+                topic=topic,
+                description=item.get("description") or item.get("subreddit"),
+                url=item.get("url"),
+                relevance_score=float(item.get("score")) if item.get("score") is not None else None,
+                fetched_at=now,
+                niche_tags=f"reddit,{item.get('subreddit')}",
             )
+        )
 
-        return self._dedupe(items)
+    if trend_models:
+        db.add_all(trend_models)
+        db.commit()
 
-    def aggregate_and_store(self) -> list[Trend]:
-        trends = self._collect()
-        self.db.add_all(trends)
-        self.db.commit()
-        for trend in trends:
-            self.db.refresh(trend)
-        return trends
+    return trend_models

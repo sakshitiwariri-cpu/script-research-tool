@@ -1,39 +1,35 @@
 from __future__ import annotations
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI
+import logging
 
-from db.session import SessionLocal
-from services.trend_aggregator import TrendAggregator
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from core.database import SessionLocal
+from services.trend_aggregator import aggregate_trends
+
+logger = logging.getLogger(__name__)
+scheduler = AsyncIOScheduler()
 
 
-scheduler = BackgroundScheduler(timezone="UTC")
-
-
-def run_trend_aggregation_job() -> None:
+def _run_aggregation_job() -> None:
     db = SessionLocal()
     try:
-        TrendAggregator(db).aggregate_and_store()
+        aggregate_trends(db)
+        logger.info("Trend aggregation completed")
+    except Exception as exc:
+        logger.exception("Trend aggregation failed: %s", exc)
     finally:
         db.close()
 
 
-def init_trend_scheduler(app: FastAPI) -> None:
-    if not scheduler.get_job("trend-aggregation"):
-        scheduler.add_job(
-            run_trend_aggregation_job,
-            trigger="interval",
-            hours=4,
-            id="trend-aggregation",
-            replace_existing=True,
-        )
+def start_trend_scheduler() -> None:
+    if scheduler.running:
+        return
 
-    @app.on_event("startup")
-    def _start_scheduler() -> None:
-        if not scheduler.running:
-            scheduler.start()
+    scheduler.add_job(_run_aggregation_job, "interval", hours=4, id="trend_aggregation", replace_existing=True)
+    scheduler.start()
 
-    @app.on_event("shutdown")
-    def _stop_scheduler() -> None:
-        if scheduler.running:
-            scheduler.shutdown(wait=False)
+
+def stop_trend_scheduler() -> None:
+    if scheduler.running:
+        scheduler.shutdown(wait=False)

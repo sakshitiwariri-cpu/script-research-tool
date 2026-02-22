@@ -1,56 +1,44 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from typing import Any
 
-import requests
+from newsapi import NewsApiClient
+
+INDIA_CATEGORIES = ["technology", "business", "entertainment"]
 
 
-class NewsService:
-    BASE_URL = "https://newsapi.org/v2/top-headlines"
-    CATEGORIES = ["technology", "business", "entertainment"]
+def _map_articles(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    mapped: list[dict[str, Any]] = []
+    for article in articles:
+        mapped.append(
+            {
+                "headline": article.get("title"),
+                "source": article.get("source", {}).get("name"),
+                "url": article.get("url"),
+                "published_at": article.get("publishedAt"),
+                "description": article.get("description"),
+            }
+        )
+    return mapped
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or os.getenv("NEWSAPI_KEY")
-        if not self.api_key:
-            raise ValueError("NEWSAPI_KEY is not set.")
 
-    def _fetch(self, category: str | None = None) -> list[dict[str, Any]]:
-        params = {"apiKey": self.api_key, "country": "in", "pageSize": 50}
-        if category:
-            params["category"] = category
+def fetch_india_headlines() -> list[dict[str, Any]]:
+    """Fetch top headlines for India and selected categories from NewsAPI."""
+    api_key = os.getenv("NEWSAPI_KEY")
+    if not api_key:
+        raise ValueError("NEWSAPI_KEY is not set")
 
-        response = requests.get(self.BASE_URL, params=params, timeout=20)
-        response.raise_for_status()
-        payload = response.json()
+    newsapi = NewsApiClient(api_key=api_key)
 
-        articles = payload.get("articles", [])
-        items: list[dict[str, Any]] = []
-        for article in articles:
-            items.append(
-                {
-                    "headline": article.get("title"),
-                    "source": (article.get("source") or {}).get("name"),
-                    "url": article.get("url"),
-                    "published_date": self._parse_date(article.get("publishedAt")),
-                    "description": article.get("description"),
-                    "category": category or "general",
-                }
-            )
-        return items
+    all_articles: list[dict[str, Any]] = []
+    general = newsapi.get_top_headlines(country="in", page_size=100)
+    all_articles.extend(_map_articles(general.get("articles", [])))
 
-    @staticmethod
-    def _parse_date(value: str | None) -> datetime | None:
-        if not value:
-            return None
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
+    for category in INDIA_CATEGORIES:
+        category_result = newsapi.get_top_headlines(country="in", category=category, page_size=100)
+        for item in _map_articles(category_result.get("articles", [])):
+            item["category"] = category
+            all_articles.append(item)
 
-    def fetch_top_headlines(self) -> list[dict[str, Any]]:
-        results = self._fetch()
-        for category in self.CATEGORIES:
-            results.extend(self._fetch(category=category))
-        return results
+    return all_articles
