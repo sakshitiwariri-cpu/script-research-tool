@@ -4,9 +4,16 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+
 from sqlalchemy.orm import Session
 
 from db import SessionLocal
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from database import get_
+
 from models.competitor import Competitor, CompetitorPost
 
 router = APIRouter(prefix="/api/competitors", tags=["competitors"])
@@ -17,7 +24,7 @@ class CompetitorCreate(BaseModel):
     instagram_handle: str
 
 
-class CompetitorOut(BaseModel):
+class CompetitorResponse(BaseModel):
     id: int
     name: str
     instagram_handle: str
@@ -28,7 +35,7 @@ class CompetitorOut(BaseModel):
         from_attributes = True
 
 
-class CompetitorPostOut(BaseModel):
+class CompetitorPostResponse(BaseModel):
     id: int
     competitor_id: int
     post_url: str
@@ -42,20 +49,12 @@ class CompetitorPostOut(BaseModel):
         from_attributes = True
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@router.post("", response_model=CompetitorOut, status_code=status.HTTP_201_CREATED)
-def add_competitor(payload: CompetitorCreate, db: Session = Depends(get_db)):
-    handle = payload.instagram_handle.lstrip("@").strip()
-    existing = db.query(Competitor).filter(Competitor.instagram_handle == handle).first()
+@router.post("", response_model=CompetitorResponse, status_code=status.HTTP_201_CREATED)
+def create_competitor(payload: CompetitorCreate, db: Session = Depends(get_db)):
+    handle = payload.instagram_handle.lstrip("@")
+    existing = db.scalar(select(Competitor).where(Competitor.instagram_handle == handle))
     if existing:
-        raise HTTPException(status_code=409, detail="Competitor already exists")
+        raise HTTPException(status_code=409, detail="Competitor already tracked")
 
     competitor = Competitor(name=payload.name, instagram_handle=handle)
     db.add(competitor)
@@ -64,28 +63,27 @@ def add_competitor(payload: CompetitorCreate, db: Session = Depends(get_db)):
     return competitor
 
 
-@router.get("", response_model=list[CompetitorOut])
+@router.get("", response_model=list[CompetitorResponse])
 def list_competitors(db: Session = Depends(get_db)):
-    return db.query(Competitor).order_by(Competitor.added_at.desc()).all()
+    return db.scalars(select(Competitor).order_by(Competitor.added_at.desc())).all()
 
 
-@router.get("/{competitor_id}/posts", response_model=list[CompetitorPostOut])
-def get_competitor_posts(competitor_id: int, db: Session = Depends(get_db)):
-    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+@router.get("/{competitor_id}/posts", response_model=list[CompetitorPostResponse])
+def list_competitor_posts(competitor_id: int, db: Session = Depends(get_db)):
+    competitor = db.get(Competitor, competitor_id)
     if not competitor:
         raise HTTPException(status_code=404, detail="Competitor not found")
 
-    return (
-        db.query(CompetitorPost)
-        .filter(CompetitorPost.competitor_id == competitor_id)
+    return db.scalars(
+        select(CompetitorPost)
+        .where(CompetitorPost.competitor_id == competitor_id)
         .order_by(CompetitorPost.posted_at.desc().nullslast(), CompetitorPost.detected_at.desc())
-        .all()
-    )
+    ).all()
 
 
 @router.delete("/{competitor_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_competitor(competitor_id: int, db: Session = Depends(get_db)):
-    competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+    competitor = db.get(Competitor, competitor_id)
     if not competitor:
         raise HTTPException(status_code=404, detail="Competitor not found")
 
