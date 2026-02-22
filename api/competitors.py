@@ -4,10 +4,16 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+
+from sqlalchemy.orm import Session
+
+from db import SessionLocal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import get_
+
 from models.competitor import Competitor, CompetitorPost
 
 router = APIRouter(prefix="/api/competitors", tags=["competitors"])
